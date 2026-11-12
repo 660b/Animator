@@ -341,6 +341,7 @@ fun DrawingScreen(
     var tab by remember { mutableStateOf(Tab.DRAW) }
     var layerPanelOpen by remember { mutableStateOf(true) }
     var timelineOpen by remember { mutableStateOf(true) }
+    var focusMode by remember { mutableStateOf(false) }
     var canvasW by remember { mutableFloatStateOf(0f) }
     var canvasH by remember { mutableFloatStateOf(0f) }
 
@@ -582,14 +583,19 @@ fun DrawingScreen(
     fun fitToScene() {
         if (canvasW <= 0f || canvasH <= 0f) return
         val t = activeProjectMeta.template
-        val s = minOf(canvasW / t.sceneW, canvasH / t.sceneH) * 0.96f
+        val s = minOf(canvasW / t.sceneW, canvasH / t.sceneH) * 0.99f
         fitScale = s
         zoomScale = s
         fitOffset = Offset((canvasW - t.sceneW * s) / 2f, (canvasH - t.sceneH * s) / 2f)
         panOffset = fitOffset
     }
 
-    LaunchedEffect(canvasW > 0f && canvasH > 0f) { fitToScene() }
+    // Sahne alanı boyutu değişince (panel aç/kapa, odak modu) kullanıcı elle zoom/kaydırma
+    // yapmadıysa sahneyi yeniden sığdır.
+    LaunchedEffect(canvasW, canvasH) {
+        val wasAtFit = abs(zoomScale - fitScale) <= 0.001f && (panOffset - fitOffset).getDistance() <= 1f
+        if (wasAtFit) fitToScene()
+    }
 
     LaunchedEffect(isPlaying, fps, isLooping) {
         while (isPlaying) {
@@ -956,7 +962,20 @@ fun DrawingScreen(
                 }
 
                 Chip(
+                    if (focusMode) "⛶ Odak: AÇIK" else "⛶ Odak",
+                    selected = focusMode,
+                    color = Accent2
+                ) { focusMode = !focusMode }
+
+                Chip(
+                    if (timelineOpen) "🎞 Zaman ▾" else "🎞 Zaman ▸",
+                    enabled = !focusMode,
+                    color = Surface2
+                ) { timelineOpen = !timelineOpen }
+
+                Chip(
                     if (topPanelOpen) "🔼 Sekmeler" else "🔽 Sekmeler",
+                    enabled = !focusMode,
                     color = Surface2
                 ) { topPanelOpen = !topPanelOpen }
 
@@ -979,7 +998,7 @@ fun DrawingScreen(
                 }
             }
 
-            if (topPanelOpen) {
+            if (topPanelOpen && !focusMode) {
                 PanelRow {
                     Tab.entries.forEach { t ->
                         Chip(t.label, selected = tab == t, enabled = !isPlaying) { selectTab(t) }
@@ -2048,10 +2067,40 @@ fun DrawingScreen(
                         }
                     }
                 }
+
+                // ---------- Mini oynatma çubuğu (zaman çizelgesi gizliyken) ----------
+                if ((focusMode || !timelineOpen) && !editorMode) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 10.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(Surface1.copy(alpha = 0.92f))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        RoundBtn("⏮", enabled = !isPlaying && currentIndex > 0) { currentIndex-- }
+                        RoundBtn(if (isPlaying) "⏸" else "▶", color = Accent2, size = 44) {
+                            if (!isPlaying && currentIndex == frames.size - 1) currentIndex = 0
+                            isPlaying = !isPlaying
+                        }
+                        RoundBtn("⏭", enabled = !isPlaying && currentIndex < frames.size - 1) { currentIndex++ }
+                        Text(
+                            "${currentIndex + 1}/${frames.size}",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (focusMode) {
+                            Chip("✕ Çık", color = Surface2) { focusMode = false }
+                        }
+                    }
+                }
             }
 
             // ---------- Aç/kapa oku ----------
-            Box(
+            if (!focusMode) Box(
                 modifier = Modifier
                     .padding(vertical = 10.dp)
                     .width(20.dp)
@@ -2070,7 +2119,7 @@ fun DrawingScreen(
             }
 
             // ---------- Sağ dock (Kütüphane & Katmanlar) ----------
-            if (layerPanelOpen) {
+            if (layerPanelOpen && !focusMode) {
                 Column(
                     modifier = Modifier
                         .width(190.dp)
@@ -2204,7 +2253,7 @@ fun DrawingScreen(
         }
 
         // ================= ALT: ZAMAN ÇİZELGESİ (TIMELINE) =================
-        if (timelineOpen && !editorMode) {
+        if (timelineOpen && !focusMode && !editorMode) {
             TimelineView(
                 frames = frames,
                 currentIndex = currentIndex,
